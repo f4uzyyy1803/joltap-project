@@ -1,0 +1,23 @@
+fastapi
+uvicorn[standard]
+pydantic
+
+# Граф дорог и маршрутизация (main.py / main_real.py)
+osmnx
+networkx
+shapely
+
+# База данных (v2 — main_real.py)
+sqlalchemy[asyncio]
+asyncpg
+psycopg2-binary
+geoalchemy2
+
+# Конфигурация
+python-dotenv
+
+# SOS-уведомления (routers_real.py)
+twilio
+
+# HTTP-запросы к внешним API (OSM и т.д.)
+requests

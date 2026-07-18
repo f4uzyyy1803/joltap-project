@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "JolTap",
+    "slug": "joltap",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#6B6FD4"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.joltap.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "JolTap использует геолокацию для маршрутов и SOS."
+      }
+    },
+    "android": {
+      "package": "com.joltap.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "VIBRATE"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "JolTap использует геолокацию для маршрутов и SOS."
+        }
+      ]
+    ]
+  }
+}

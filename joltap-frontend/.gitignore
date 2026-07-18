@@ -1,0 +1,36 @@
+# --- Секреты ---
+.env
+.env.local
+.env.*.local
+
+# --- Node ---
+node_modules/
+
+# --- Expo ---
+.expo/
+dist/
+web-build/
+
+# --- Native build артефакты ---
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# --- Metro ---
+.metro-health-check*
+
+# --- IDE ---
+.idea/
+.vscode/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Логи ---
+npm-debug.*
+yarn-debug.*
+yarn-error.*
