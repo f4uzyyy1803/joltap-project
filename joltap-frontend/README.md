@@ -39,24 +39,18 @@ cd JolTapApp
 npm install
 ```
 
-### 4. Настрой адрес бэкенда
-Открой `src/services/api.js` и поменяй BASE_URL:
-
-```js
-// Если бэкенд на том же компьютере:
-const BASE_URL = 'http://192.168.1.XX:8000';  // твой IP в Wi-Fi сети
-//                              ^^^
-//                    узнать: ipconfig (Windows) / ifconfig (Mac)
-```
-
-### 5. Запусти бэкенд
+### 4. Запусти бэкенд
 ```bash
-cd joltap
+cd joltap-backend
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 # --host 0.0.0.0 важно! Иначе телефон не подключится
 ```
 
-### 6. Запусти приложение
+Адрес бэкенда (`BASE_URL` в `src/services/api.js`) вписывать вручную **не нужно** —
+приложение само определяет IP компьютера через Expo (см. `EXPO_PUBLIC_API_URL`
+в `.env.example`, если бэкенд всё же на другой машине).
+
+### 5. Запусти приложение
 ```bash
 cd JolTapApp
 npx expo start

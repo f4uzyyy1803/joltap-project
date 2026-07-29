@@ -12,6 +12,7 @@ from services.hazards_sos import (
     get_hazards_near, report_hazard,
     trigger_sos, save_user_profile, get_user_profile
 )
+from services.weather import get_weather
 
 
 # ─── Роутер: Маршруты ────────────────────────────────────
@@ -108,3 +109,26 @@ async def get_profile(user_id: str):
     if not profile:
         raise HTTPException(status_code=404, detail="Профиль не найден")
     return profile
+
+
+# ─── Роутер: Погода ───────────────────────────────────────
+
+weather_router = APIRouter(prefix="/weather", tags=["Погода"])
+
+@weather_router.get("", summary="Текущая погода")
+async def get_current_weather(
+    lat: float = Query(..., description="Широта"),
+    lon: float = Query(..., description="Долгота"),
+):
+    """
+    Погода для координат + флаг риска гололёда.
+
+    Ключ OpenWeatherMap хранится только на бэкенде (.env) и никогда
+    не попадает в мобильное приложение.
+    """
+    try:
+        return get_weather(lat, lon)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Ошибка получения погоды: {str(e)}")

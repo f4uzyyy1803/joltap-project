@@ -7,7 +7,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Location from 'expo-location';
 import SOSButton from '../components/SOSButton';
+import { getWeather } from '../services/api';
 import { colors, radius } from '../theme';
 
 const ARTICLES = [
@@ -19,11 +21,12 @@ const ARTICLES = [
 export default function HomeScreen({ navigation }) {
   const [userName, setUserName] = useState('');
   const [userId, setUserId]   = useState('');
-  const [weather, setWeather] = useState({ temp: '+18°', city: 'Алматы', feels: '+14', desc: 'облачно', emoji: '⛅' });
+  const [weather, setWeather] = useState({ temp: '—', city: 'Алматы', feels: '—', desc: 'загрузка...', emoji: '⛅', ice_risk: false });
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     loadUser();
+    loadWeather();
   }, []);
 
   const loadUser = async () => {
@@ -33,9 +36,35 @@ export default function HomeScreen({ navigation }) {
     setUserId(id);
   };
 
+  const loadWeather = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      let lat = 43.238949, lon = 76.889709; // Алматы по умолчанию, если нет доступа к геолокации
+      if (status === 'granted') {
+        const pos = await Location.getCurrentPositionAsync({});
+        lat = pos.coords.latitude;
+        lon = pos.coords.longitude;
+      }
+      const data = await getWeather(lat, lon);
+      setWeather({
+        temp: `${data.temp > 0 ? '+' : ''}${data.temp}°`,
+        city: data.city || 'Алматы',
+        feels: `${data.feels_like > 0 ? '+' : ''}${data.feels_like}°`,
+        desc: data.description,
+        emoji: data.emoji,
+        ice_risk: data.ice_risk,
+      });
+    } catch (e) {
+      console.log('Weather error:', e.message);
+      // Оставляем плейсхолдер, если бэкенд/ключ ещё не настроены
+      setWeather({ temp: '—', city: 'Алматы', feels: '—', desc: 'нет данных', emoji: '⛅', ice_risk: false });
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     await loadUser();
+    await loadWeather();
     setRefreshing(false);
   };
 
@@ -66,6 +95,11 @@ export default function HomeScreen({ navigation }) {
               <Text style={styles.weatherTemp}>{weather.temp}</Text>
               <Text style={styles.weatherFeel}>ощущается как {weather.feels}</Text>
               <Text style={styles.weatherDesc}>{weather.desc}</Text>
+              {weather.ice_risk && (
+                <View style={styles.iceWarning}>
+                  <Text style={styles.iceWarningText}>⚠️ Возможен гололёд</Text>
+                </View>
+              )}
             </View>
             <Text style={styles.weatherEmoji}>{weather.emoji}</Text>
           </View>
@@ -129,6 +163,11 @@ const styles = StyleSheet.create({
   weatherFeel: { color: 'rgba(255,255,255,0.8)', fontSize: 13 },
   weatherDesc: { color: 'rgba(255,255,255,0.8)', fontSize: 13 },
   weatherEmoji: { fontSize: 64 },
+  iceWarning: {
+    marginTop: 8, backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: radius.full, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start',
+  },
+  iceWarningText: { color: 'white', fontSize: 12, fontWeight: '700' },
 
   premiumCard: { backgroundColor: colors.purpleLight, borderRadius: radius.md, padding: 20, marginBottom: 24 },
   premiumTitle: { fontSize: 24, fontWeight: '900', color: colors.yellow, marginBottom: 12 },

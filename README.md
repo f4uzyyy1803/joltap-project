@@ -28,7 +28,7 @@ _[добавь сюда 3-4 скриншота: карта с маршрутом
 
 ```
 joltap/
-├── JolTapApp/       ← Фронтенд (React Native + Expo)
+├── joltap-frontend/   ← Фронтенд (React Native + Expo)
 └── joltap-backend/  ← Бэкенд (FastAPI + PostgreSQL/PostGIS)
 ```
 
@@ -44,6 +44,7 @@ joltap/
 | POST | `/sos/activate` | SOS-кнопка |
 | POST | `/user/profile` | Сохранить профиль пользователя |
 | GET | `/user/profile/{id}` | Получить профиль |
+| GET | `/weather` | Погода по координатам + флаг риска гололёда |
 
 ## Быстрый запуск
 
@@ -59,15 +60,20 @@ Production-версия с реальной БД (PostgreSQL/PostGIS) и под�
 
 **Фронтенд:**
 ```bash
-cd JolTapApp
+cd joltap-frontend
 npm install
 npx expo start
 ```
-Отсканируй QR в приложении **Expo Go** (iOS/Android). Подробности — в [`JolTapApp/README.md`](./JolTapApp/README.md).
+Отсканируй QR в приложении **Expo Go** (iOS/Android). Подробности — в [`joltap-frontend/README.md`](./joltap-frontend/README.md).
 
 ## Безопасность
 
-Ключи и креды хранятся в `.env` (не коммитится, см. `.env.example` с шаблоном) и никогда не попадают в мобильный бандл. Подробный чек-лист — в [`SECURITY.md`](./SECURITY.md).
+Все ключи и креды хранятся в `.env` (файл в `.gitignore`, не коммитится — есть шаблон `.env.example` в `joltap-backend/` и `joltap-frontend/`).
+
+- **Секретные ключи** (OpenWeatherMap, Twilio, база данных) живут **только на бэкенде**. Мобильное приложение никогда их не видит — оно ходит на свои же эндпоинты (`/weather`, `/sos/activate`), а бэкенд уже сам стучится во внешние API.
+- **MapTiler-ключ** (для карт) — по своей природе тоже клиентский (он должен попасть на устройство, чтобы загружать тайлы), поэтому передаётся во фронтенд через `EXPO_PUBLIC_MAPTILER_KEY`. Регистрация в MapTiler не требует карты. Ключ всё равно не коммитится в git, а в дашборде MapTiler стоит ограничить его по домену/квоте.
+
+Подробный чек-лист — в [`SECURITY.md`](./SECURITY.md).
 
 ## Команда
 

@@ -3,6 +3,11 @@ import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'rea
 import { WebView } from 'react-native-webview';
 import { colors } from '../theme';
 
+// Ключ читается из .env (EXPO_PUBLIC_MAPTILER_KEY), не хардкодится в коде.
+// MapTiler: бесплатный тариф без привязки карты, 100k тайлов/мес.
+// Получить ключ: https://cloud.maptiler.com/account/keys/ (только email).
+const MAPTILER_KEY = process.env.EXPO_PUBLIC_MAPTILER_KEY;
+
 export default function RouteMap({ startLat, startLon, endLat, endLon, destName, onClose, distanceMeters, durationMinutes }) {
   const [loading, setLoading] = useState(true);
 
@@ -10,6 +15,13 @@ export default function RouteMap({ startLat, startLon, endLat, endLon, destName,
   const midLon = (startLon + endLon) / 2;
   const dist = Math.sqrt((endLat - startLat) ** 2 + (endLon - startLon) ** 2);
   const zoom = dist < 0.01 ? 15 : dist < 0.05 ? 13 : dist < 0.1 ? 12 : dist < 0.3 ? 11 : 10;
+
+  // MapTiler даёт заметно более чёткие тайлы (512px, как у "retina"), чем
+  // бесплатный CartoDB. Если ключ не задан — тихо откатываемся на CartoDB,
+  // чтобы приложение не падало.
+  const tileLayer = MAPTILER_KEY
+    ? `L.tileLayer('https://api.maptiler.com/maps/streets-v4/{z}/{x}/{y}.png?key=${MAPTILER_KEY}', { maxZoom:20, tileSize:512, zoomOffset:-1, attribution:'© MapTiler © OpenStreetMap' }).addTo(map);`
+    : `L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:20, attribution:'CartoDB' }).addTo(map);`;
 
   const html = `<!DOCTYPE html>
 <html>
@@ -34,7 +46,7 @@ export default function RouteMap({ startLat, startLon, endLat, endLon, destName,
 <script>
 const map = L.map('map').setView([${midLat}, ${midLon}], ${zoom});
 
-L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:20, attribution:'CartoDB' }).addTo(map);
+${tileLayer}
 
 // Маркер конечной точки
 const endMarker = L.marker([${endLat}, ${endLon}], {

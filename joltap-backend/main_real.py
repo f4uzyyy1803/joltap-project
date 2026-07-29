@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database.db import create_tables
-from routers.routers_real import route_router, map_router, sos_router, user_router
+from routers.routers_real import route_router, map_router, sos_router, user_router, weather_router
 
 
 @asynccontextmanager
@@ -56,6 +56,7 @@ app.include_router(route_router)
 app.include_router(map_router)
 app.include_router(sos_router)
 app.include_router(user_router)
+app.include_router(weather_router)
 
 
 @app.get("/", tags=["Статус"])
