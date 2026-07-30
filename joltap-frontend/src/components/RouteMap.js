@@ -38,10 +38,32 @@ export default function RouteMap({ startLat, startLon, endLat, endLon, destName,
 .info-item { flex:1; text-align:center; }
 .info-num { font-size:22px; font-weight:900; color:#6B6FD4; }
 .info-label { font-size:11px; color:#888; }
+
+/* Маркер "я здесь": статичный кружок-фон + отдельно вращающаяся стрелка внутри.
+   Так фон/тень не дёргаются при повороте, а стрелка поворачивается плавно (CSS transition). */
+.me-wrap { width:36px; height:36px; position:relative; }
+.me-circle {
+  position:absolute; inset:0; border-radius:50%;
+  background:linear-gradient(135deg,#6B6FD4,#8B8FE8);
+  border:3px solid white; box-shadow:0 4px 16px rgba(107,111,212,0.5);
+}
+.me-arrow {
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  transition: transform 0.25s linear;
+  will-change: transform;
+}
+.recenter-btn {
+  position:fixed; right:16px; bottom:140px; z-index:1000;
+  width:44px; height:44px; border-radius:22px; background:white;
+  box-shadow:0 4px 12px rgba(0,0,0,0.25); display:flex; align-items:center; justify-content:center;
+  font-size:18px; opacity:0; pointer-events:none; transition: opacity 0.2s;
+}
+.recenter-btn.show { opacity:1; pointer-events:auto; }
 </style>
 </head>
 <body>
 <div id="map"></div>
+<button class="recenter-btn" id="recenterBtn">🎯</button>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const map = L.map('map').setView([${midLat}, ${midLon}], ${zoom});
@@ -54,16 +76,17 @@ const endMarker = L.marker([${endLat}, ${endLon}], {
 }).addTo(map).bindPopup('<b>${destName || "Назначение"}</b>').openPopup();
 
 // Маркер моего местоположения (обновляется в реальном времени)
-const arrowHtml = '<div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#6B6FD4,#8B8FE8);border:3px solid white;box-shadow:0 4px 16px rgba(107,111,212,0.5);display:flex;align-items:center;justify-content:center;"><div style="width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-bottom:18px solid white;margin-bottom:4px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.2));"></div></div>';
+const arrowHtml = '<div class="me-wrap"><div class="me-circle"></div><div class="me-arrow"><svg width="16" height="16" viewBox="0 0 24 24"><path d="M12 2 L19 21 L12 16.5 L5 21 Z" fill="white"/></svg></div></div>';
 
 const arrowIcon = L.divIcon({
   html: arrowHtml,
   className: '',
   iconSize: [36, 36],
-  iconAnchor: [18, 36],
+  iconAnchor: [18, 18], // центр иконки = точка GPS: раньше был якорь снизу, из-за чего
+                        // кружок визуально "плавал" мимо круга точности
 });
 
-let myMarker = L.marker([${startLat}, ${startLon}], { icon: arrowIcon })
+let myMarker = L.marker([${startLat}, ${startLon}], { icon: arrowIcon, zIndexOffset: 1000 })
   .addTo(map)
   .bindPopup('Вы здесь');
 
@@ -71,7 +94,67 @@ let accuracyCircle = L.circle([${startLat}, ${startLon}], {
   radius: 20, color: '#6B6FD4', fillColor: '#6B6FD4', fillOpacity: 0.1, weight: 1
 }).addTo(map);
 
-// Строим маршрут
+// ---------- Плавное перемещение маркера между точками (без "телепортации") ----------
+let moveAnimFrame = null;
+function animateMarkerTo(marker, lat, lon, duration) {
+  const from = marker.getLatLng();
+  const start = performance.now();
+  if (moveAnimFrame) cancelAnimationFrame(moveAnimFrame);
+  function step(now) {
+    const t = Math.min((now - start) / duration, 1);
+    const ease = t; // линейно — движение почти непрерывное (GPS и так шлёт точки раз в 1-2с)
+    const curLat = from.lat + (lat - from.lat) * ease;
+    const curLon = from.lng + (lon - from.lng) * ease;
+    marker.setLatLng([curLat, curLon]);
+    if (t < 1) {
+      moveAnimFrame = requestAnimationFrame(step);
+    }
+  }
+  moveAnimFrame = requestAnimationFrame(step);
+}
+
+// ---------- Поворот стрелки: девайс-компас, если есть, иначе — по направлению движения ----------
+let headingContinuous = 0; // не обрезаем по модулю 360, чтобы стрелка не "скручивалась" через 359->0
+function setHeading(newHeadingDeg) {
+  let delta = (newHeadingDeg - (headingContinuous % 360)) % 360;
+  if (delta < -180) delta += 360;
+  if (delta > 180) delta -= 360;
+  headingContinuous += delta;
+  const el = myMarker.getElement();
+  if (el) {
+    const arrowEl = el.querySelector('.me-arrow');
+    if (arrowEl) arrowEl.style.transform = 'rotate(' + headingContinuous + 'deg)';
+  }
+}
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function bearing(lat1, lon1, lat2, lon2) {
+  const φ1 = lat1 * Math.PI/180, φ2 = lat2 * Math.PI/180;
+  const Δλ = (lon2 - lon1) * Math.PI/180;
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1)*Math.sin(φ2) - Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
+  return (Math.atan2(y, x) * 180/Math.PI + 360) % 360;
+}
+
+function formatDist(m) {
+  return m >= 1000 ? (m/1000).toFixed(1) + ' км' : Math.round(m) + ' м';
+}
+function formatDur(min) {
+  return min >= 60 ? Math.floor(min/60) + ' ч ' + Math.round(min%60) + ' мин' : Math.round(min) + ' мин';
+}
+
+// Инициализация панели снизу теми же значениями, что показывает React (для консистентности)
+document.getElementById('dist').textContent = formatDist(${distanceMeters || 0});
+document.getElementById('dur').textContent = formatDur(${durationMinutes || 0});
+
+// Строим маршрут (один раз)
 fetch('https://router.project-osrm.org/route/v1/foot/${startLon},${startLat};${endLon},${endLat}?overview=full&geometries=geojson')
   .then(r => r.json())
   .then(data => {
@@ -79,7 +162,6 @@ fetch('https://router.project-osrm.org/route/v1/foot/${startLon},${startLat};${e
       const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
       const line = L.polyline(coords, { color:'#6B6FD4', weight:6, opacity:0.9 }).addTo(map);
       map.fitBounds(line.getBounds(), { padding:[60,60] });
-
     }
   })
   .catch(() => {
@@ -88,66 +170,82 @@ fetch('https://router.project-osrm.org/route/v1/foot/${startLon},${startLat};${e
     }).addTo(map);
   });
 
+// ---------- Слежение за компасом устройства (когда GPS heading недоступен, напр. стоим на месте) ----------
+let deviceHeading = null;
+window.addEventListener('deviceorientationabsolute', onOrientation, true);
+window.addEventListener('deviceorientation', onOrientation, true);
+function onOrientation(e) {
+  let h = null;
+  if (e.webkitCompassHeading !== undefined && e.webkitCompassHeading !== null) {
+    h = e.webkitCompassHeading; // iOS Safari
+  } else if (e.alpha !== null && e.absolute) {
+    h = 360 - e.alpha; // Android (absolute orientation)
+  }
+  if (h !== null && !isNaN(h)) deviceHeading = h;
+}
+
+// ---------- Слежение "камера следует за пользователем", с возможностью отключить свайпом ----------
+let followMe = true;
+const recenterBtn = document.getElementById('recenterBtn');
+map.on('dragstart', () => { followMe = false; recenterBtn.classList.add('show'); });
+recenterBtn.addEventListener('click', () => {
+  followMe = true;
+  recenterBtn.classList.remove('show');
+  map.panTo(myMarker.getLatLng(), { animate: true, duration: 0.6 });
+});
+
 // Отслеживание движения через GPS
+let lastFix = null; // { lat, lon, t }
 if (navigator.geolocation) {
   navigator.geolocation.watchPosition(
     (pos) => {
       const lat = pos.coords.latitude;
       const lon = pos.coords.longitude;
       const acc = pos.coords.accuracy;
+      const now = Date.now();
 
-      // Обновляем маркер
-      myMarker.setLatLng([lat, lon]);
-        if (pos.coords.heading !== null && pos.coords.heading !== undefined) {
-          const heading = pos.coords.heading;
-          const el = myMarker.getElement();
-          if (el) {
-    el.querySelector('div').style.transform = 'rotate(' + (heading - 45) + 'deg)';
-  }
-}
+      // Плавно едем в новую точку, а не телепортируемся
+      animateMarkerTo(myMarker, lat, lon, 700);
       accuracyCircle.setLatLng([lat, lon]).setRadius(acc);
 
-      // Следим за движением
-      map.panTo([lat, lon], { animate: true, duration: 1 });
+      // Направление стрелки, по приоритету:
+      // 1) GPS heading, если устройство реально движется (иначе он "шумит")
+      // 2) азимут между предыдущей и текущей GPS-точкой, если сдвиг заметный (>2м, иначе дрожит от шума GPS)
+      // 3) компас устройства, если стоим на месте
+      let heading = null;
+      if (pos.coords.heading !== null && pos.coords.heading !== undefined && !isNaN(pos.coords.heading) && (pos.coords.speed || 0) > 0.3) {
+        heading = pos.coords.heading;
+      } else if (lastFix && haversine(lastFix.lat, lastFix.lon, lat, lon) > 2) {
+        heading = bearing(lastFix.lat, lastFix.lon, lat, lon);
+      } else if (deviceHeading !== null) {
+        heading = deviceHeading;
+      }
+      if (heading !== null) setHeading(heading);
 
-      // Считаем оставшееся расстояние до цели
-      const R = 6371000;
-      const dLat = (${endLat} - lat) * Math.PI / 180;
-      const dLon = (${endLon} - lon) * Math.PI / 180;
-      const a = Math.sin(dLat/2)**2 + Math.cos(lat*Math.PI/180)*Math.cos(${endLat}*Math.PI/180)*Math.sin(dLon/2)**2;
-      const remaining = Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
-      const t = Math.round(remaining / 67);
+      // Камера следует за пользователем, пока он сам не отодвинет карту
+      if (followMe) {
+        map.panTo([lat, lon], { animate: true, duration: 0.8 });
+      }
 
-      // Если дошли до цели (менее 30м)
-     // Если дошли до цели (менее 30м)
+      // Оставшееся расстояние/время до цели — обновляем на каждый GPS-фикс,
+      // а не только в момент прибытия (раньше цифры внизу вообще не менялись в пути).
+      const remaining = haversine(lat, lon, ${endLat}, ${endLon});
+      const remainingMin = remaining / 67; // ~67 м/мин пешком
+
       if (remaining < 30) {
         document.getElementById('dist').textContent = '✅ Вы на месте!';
         document.getElementById('dur').textContent = '🎉';
+      } else {
+        document.getElementById('dist').textContent = formatDist(remaining);
+        document.getElementById('dur').textContent = formatDur(remainingMin);
       }
+
+      lastFix = { lat, lon, t: now };
     },
     (err) => console.log('GPS error:', err),
-    { enableHighAccuracy: true, timeout: 5000, maximumAge: 2000 }
+    { enableHighAccuracy: true, timeout: 5000, maximumAge: 1000 }
   );
 }
-
-
-const startIcon = L.circleMarker([${startLat}, ${startLon}], { radius:8, color:'#6B6FD4', fillColor:'#6B6FD4', fillOpacity:1 }).addTo(map).bindPopup('Я здесь');
-const endIcon = L.marker([${endLat}, ${endLon}]).addTo(map).bindPopup('${destName || "Назначение"}').openPopup();
-
-fetch('https://router.project-osrm.org/route/v1/foot/${startLon},${startLat};${endLon},${endLat}?overview=full&geometries=geojson')
-  .then(r => r.json())
-  .then(data => {
-    if (data.routes && data.routes[0]) {
-      const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
-      const line = L.polyline(coords, { color:'#6B6FD4', weight:5 }).addTo(map);
-      map.fitBounds(line.getBounds(), { padding:[40,40] });
-      const d = data.routes[0].distance;
-      const t = Math.round(d / 67);
-    }
-  })
-  .catch(() => {
-    L.polyline([[${startLat},${startLon}],[${endLat},${endLon}]], { color:'#6B6FD4', weight:5, dashArray:'8,8' }).addTo(map);
-  });
 </script>
 <div class="info">
   <div class="info-title">📍 До ${destName || 'пункта назначения'}</div>
