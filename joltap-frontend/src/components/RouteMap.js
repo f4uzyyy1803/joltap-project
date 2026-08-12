@@ -8,8 +8,15 @@ import { colors } from '../theme';
 // Получить ключ: https://cloud.maptiler.com/account/keys/ (только email).
 const MAPTILER_KEY = process.env.EXPO_PUBLIC_MAPTILER_KEY;
 
-export default function RouteMap({ startLat, startLon, endLat, endLon, destName, onClose, distanceMeters, durationMinutes }) {
+export default function RouteMap({ startLat, startLon, endLat, endLon, destName, onClose, distanceMeters, durationMinutes, coordinates }) {
   const [loading, setLoading] = useState(true);
+
+  // Геометрия, реально посчитанная бэкендом для выбранного типа маршрута
+  // (safe/accessible/fast — у каждого своя, с обходом препятствий, если бэкенд
+  // real). Рисуем её напрямую вместо того, чтобы тянуть отдельный маршрут
+  // с публичного OSRM, который ничего не знает ни про тип маршрута, ни про
+  // препятствия. OSRM остаётся только запасным вариантом, если backendCoords пуст.
+  const routeCoords = Array.isArray(coordinates) && coordinates.length >= 2 ? coordinates : [];
 
   const midLat = (startLat + endLat) / 2;
   const midLon = (startLon + endLon) / 2;
@@ -154,21 +161,32 @@ function formatDur(min) {
 document.getElementById('dist').textContent = formatDist(${distanceMeters || 0});
 document.getElementById('dur').textContent = formatDur(${durationMinutes || 0});
 
-// Строим маршрут (один раз)
-fetch('https://router.project-osrm.org/route/v1/foot/${startLon},${startLat};${endLon},${endLat}?overview=full&geometries=geojson')
-  .then(r => r.json())
-  .then(data => {
-    if (data.routes && data.routes[0]) {
-      const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
-      const line = L.polyline(coords, { color:'#6B6FD4', weight:6, opacity:0.9 }).addTo(map);
-      map.fitBounds(line.getBounds(), { padding:[60,60] });
-    }
-  })
-  .catch(() => {
-    L.polyline([[${startLat},${startLon}],[${endLat},${endLon}]], {
-      color:'#6B6FD4', weight:5, dashArray:'8,8'
-    }).addTo(map);
-  });
+// Строим маршрут: в приоритете — реальная геометрия из бэкенда
+// (массив ниже подставляется на этапе рендера React-компонента, не в WebView).
+const backendCoords = ${JSON.stringify(routeCoords)};
+
+if (backendCoords.length >= 2) {
+  // Линия ровно та, что посчитал сервер для выбранного типа маршрута
+  const line = L.polyline(backendCoords, { color:'#6B6FD4', weight:6, opacity:0.9 }).addTo(map);
+  map.fitBounds(line.getBounds(), { padding:[60,60] });
+} else {
+  // Бэкенд не прислал координаты (например, локальный fallback без сети) —
+  // берём маршрут с публичного OSRM просто чтобы линия не пропадала совсем.
+  fetch('https://router.project-osrm.org/route/v1/foot/${startLon},${startLat};${endLon},${endLat}?overview=full&geometries=geojson')
+    .then(r => r.json())
+    .then(data => {
+      if (data.routes && data.routes[0]) {
+        const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+        const line = L.polyline(coords, { color:'#6B6FD4', weight:6, opacity:0.9 }).addTo(map);
+        map.fitBounds(line.getBounds(), { padding:[60,60] });
+      }
+    })
+    .catch(() => {
+      L.polyline([[${startLat},${startLon}],[${endLat},${endLon}]], {
+        color:'#6B6FD4', weight:5, dashArray:'8,8'
+      }).addTo(map);
+    });
+}
 
 // ---------- Слежение за компасом устройства (когда GPS heading недоступен, напр. стоим на месте) ----------
 let deviceHeading = null;

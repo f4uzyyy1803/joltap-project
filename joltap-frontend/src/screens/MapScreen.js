@@ -472,6 +472,7 @@ const handleBuildRoute = async () => {
             destName={destination}
             distanceMeters={selectedRoute?.distance_meters}
             durationMinutes={selectedRoute?.duration_minutes}
+            coordinates={selectedRoute?.coordinates}
             onClose={() => setShowMap(false)}
             />
           </View>
