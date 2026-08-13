@@ -1,11 +1,25 @@
 
 import math
+import time
 import requests
 from typing import List, Dict, Optional
 from models.models import RouteWarning, HazardType
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 OSRM_URL = "https://router.project-osrm.org/route/v1/foot"
+
+# Простой in-memory кэш Overpass-запросов по округлённому bbox.
+# Overpass — публичный сервис с ограничением по частоте запросов, и без
+# кэша он дёргался на каждый запрос маршрута, что было и медленно (до
+# 15 сек таймаута), и рискованно (могут забанить по IP при нагрузке).
+_hazards_cache: Dict[str, dict] = {}
+_HAZARDS_CACHE_TTL_SECONDS = 600  # 10 минут — препятствия не появляются ежеминутно
+
+
+def _bbox_cache_key(min_lat, min_lon, max_lat, max_lon) -> str:
+    # округляем до ~100м, чтобы близкие маршруты попадали в один и тот же кэш
+    r = lambda x: round(x, 3)
+    return f"{r(min_lat)}:{r(min_lon)}:{r(max_lat)}:{r(max_lon)}"
 
 
 def get_osrm_route_distance(start_lat, start_lon, end_lat, end_lon, timeout=6):
@@ -45,6 +59,11 @@ def get_real_hazards(start_lat, start_lon, end_lat, end_lon, padding=0.004) -> L
     max_lon = max(start_lon, end_lon) + padding
     bbox = f"{min_lat},{min_lon},{max_lat},{max_lon}"
 
+    cache_key = _bbox_cache_key(min_lat, min_lon, max_lat, max_lon)
+    cached = _hazards_cache.get(cache_key)
+    if cached and (time.time() - cached["ts"]) < _HAZARDS_CACHE_TTL_SECONDS:
+        return cached["data"]
+
     query = f"""
     [out:json][timeout:12];
     (
@@ -58,7 +77,15 @@ def get_real_hazards(start_lat, start_lon, end_lat, end_lon, padding=0.004) -> L
     """
 
     try:
-        resp = requests.post(OVERPASS_URL, data={"data": query}, timeout=15)
+        resp = requests.post(
+            OVERPASS_URL,
+            data={"data": query},
+            headers={
+                "User-Agent": "JolTap-hackathon-project/1.0 (contact: see README)",
+                "Accept": "application/json",
+            },
+            timeout=15,
+        )
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
@@ -89,6 +116,7 @@ def get_real_hazards(start_lat, start_lon, end_lat, end_lon, padding=0.004) -> L
             hazards.append({
                 "lat": lat, "lon": lon,
                 "hazard_type": HazardType.curb, "severity": 3,
+                "passable": False,  # непроходимо для коляски без объезда
                 "message_ru": "Высокий бордюр без понижения",
                 "message_kz": "Жоғары бордюр, түсу жоқ",
                 "message_en": "High curb, no dip",
@@ -100,6 +128,7 @@ def get_real_hazards(start_lat, start_lon, end_lat, end_lon, padding=0.004) -> L
             hazards.append({
                 "lat": lat, "lon": lon,
                 "hazard_type": HazardType.pothole, "severity": 2,
+                "passable": True,  # проходимо, но с осторожностью/медленнее
                 "message_ru": f"Неровное покрытие тротуара ({surface})",
                 "message_kz": "Жол беті тегіс емес",
                 "message_en": f"Rough surface ({surface})",
@@ -110,6 +139,7 @@ def get_real_hazards(start_lat, start_lon, end_lat, end_lon, padding=0.004) -> L
             hazards.append({
                 "lat": lat, "lon": lon,
                 "hazard_type": HazardType.poor_lighting, "severity": 1,
+                "passable": True,
                 "message_ru": "Участок без освещения",
                 "message_kz": "Жарықсыз учаске",
                 "message_en": "Unlit section",
@@ -120,6 +150,7 @@ def get_real_hazards(start_lat, start_lon, end_lat, end_lon, padding=0.004) -> L
             hazards.append({
                 "lat": lat, "lon": lon,
                 "hazard_type": HazardType.curb, "severity": 3,
+                "passable": False,  # лестница без пандуса — непроходимо для коляски
                 "message_ru": "Лестница без пандуса",
                 "message_kz": "Баспалдақ, пандус жоқ",
                 "message_en": "Steps, no ramp",
@@ -131,28 +162,42 @@ def get_real_hazards(start_lat, start_lon, end_lat, end_lon, padding=0.004) -> L
             hazards.append({
                 "lat": lat, "lon": lon,
                 "hazard_type": HazardType.construction, "severity": 2,
+                "passable": barrier not in ("wall", "block"),  # эти два реально перекрывают путь
                 "message_ru": "Препятствие на тротуаре",
                 "message_kz": "Жолда кедергі бар",
                 "message_en": f"Obstacle on path ({barrier})",
             })
 
+    _hazards_cache[cache_key] = {"data": hazards, "ts": time.time()}
     return hazards
 
 
-def hazards_to_warnings(hazards: List[Dict], start_lat, start_lon, max_count=5) -> List[RouteWarning]:
+def hazards_to_warnings(
+    hazards: List[Dict], start_lat, start_lon, max_count: Optional[int] = None
+) -> List[RouteWarning]:
     """
-    Преобразует найденные хазарды в предупреждения,
-    отсортированные по расстоянию от старта.
+    Преобразует найденные хазарды в предупреждения с координатами (для
+    маркеров на карте) и флагом passable, отсортированные по расстоянию
+    от старта.
+
+    max_count=None (по умолчанию) — вернуть все найденные препятствия,
+    чтобы на карте было видно полную картину; передайте число, если
+    нужно ограничить (например, для короткого текстового списка).
     """
     for h in hazards:
         h["_dist"] = haversine(start_lat, start_lon, h["lat"], h["lon"])
 
-    hazards_sorted = sorted(hazards, key=lambda x: x["_dist"])[:max_count]
+    hazards_sorted = sorted(hazards, key=lambda x: x["_dist"])
+    if max_count is not None:
+        hazards_sorted = hazards_sorted[:max_count]
 
     warnings = []
     for h in hazards_sorted:
         warnings.append(RouteWarning(
             distance_meters=round(h["_dist"]),
+            lat=h["lat"],
+            lon=h["lon"],
+            passable=h.get("passable", True),
             type=h["hazard_type"],
             message_ru=h["message_ru"],
             message_kz=h["message_kz"],

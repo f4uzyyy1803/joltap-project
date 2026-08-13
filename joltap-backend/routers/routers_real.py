@@ -5,6 +5,7 @@ FastAPI роутеры с реальным PostgreSQL.
 """
 
 import os
+import traceback
 from fastapi import APIRouter, HTTPException, Query, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
@@ -17,6 +18,7 @@ from models.models import (
     UserProfile
 )
 from services.routing_real import build_routes_real
+from services.graph import UnsupportedLocationError
 from services.hazards_db import (
     get_hazards_near_db, report_hazard_db,
     save_sos_log, save_profile_db, get_profile_db
@@ -39,6 +41,7 @@ async def build_route(
     try:
         return await build_routes_real(request, db)
     except Exception as e:
+        traceback.print_exc()
         raise HTTPException(500, f"Ошибка маршрутизации: {e}")
 
 

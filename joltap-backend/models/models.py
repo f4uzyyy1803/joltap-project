@@ -65,6 +65,14 @@ class RouteWarning(BaseModel):
     message_kz: str
     message_en: str
 
+    # координаты препятствия — чтобы фронтенд мог поставить маркер на карте
+    lat: float
+    lon: float
+    # можно ли реально пройти/проехать здесь для этого типа маршрута
+    # (False — например, лестница без пандуса на accessible-маршруте,
+    # высокий бордюр, стена/блокирующий барьер)
+    passable: bool = True
+
 class RouteVariant(BaseModel):
     route_type: RouteType
     coordinates: List[List[float]]   # [[lat, lon], ...]

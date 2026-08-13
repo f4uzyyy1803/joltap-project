@@ -157,8 +157,19 @@ async def report_hazard_db(db: AsyncSession, report: HazardReport) -> dict:
 
 async def get_hazards_for_graph(db: AsyncSession) -> List[dict]:
     """
-    Загрузить все активные препятствия для обогащения графа.
-    Вызывается при построении маршрута.
+    Загрузить препятствия для обогащения графа (влияют на маршрут для ВСЕХ
+    пользователей) — берём только те, что подтверждены минимум двумя
+    репортами (confirmed_count >= 2).
+
+    Раньше единственный (даже случайный или недобросовестный) репорт сразу
+    получал status='active' и немедленно начинал влиять на маршруты всех
+    пользователей, хотя пользователю в ответ показывалось сообщение
+    "проходит модерацию" — по факту никакой модерации не было. Полноценная
+    модерация (админ-эндпоинт, ИИ-проверка фото и т.п.) в этот файл не
+    входит, поэтому как временная защита от спама/накрутки используется
+    порог confirmed_count >= 2. На карту "опасности рядом" (get_hazards_near_db)
+    это ограничение не распространяется — там видно всё, включая
+    неподтверждённые репорты, с их confirmed_count.
     """
     sql = text("""
         SELECT
@@ -167,7 +178,7 @@ async def get_hazards_for_graph(db: AsyncSession) -> List[dict]:
             ST_Y(location::geometry) as lat,
             ST_X(location::geometry) as lon
         FROM hazards
-        WHERE status = 'active'
+        WHERE status = 'active' AND confirmed_count >= 2
     """)
     result = await db.execute(sql)
     return [

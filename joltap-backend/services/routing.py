@@ -178,8 +178,17 @@ def build_routes(
                 # Для accessible не показываем бордюры даже из резерва
                 if rtype == RouteType.accessible and htype == HazardType.curb:
                     continue
+                # Резервных координат у нас нет (реальные данные OSM недоступны) —
+                # интерполируем точку вдоль прямой между А и Б пропорционально
+                # пройденному расстоянию, чтобы маркер на карте всё же был.
+                t = min(1.0, (step * (i + 1)) / distance) if distance else 0
+                marker_lat = request.start_lat + (request.end_lat - request.start_lat) * t
+                marker_lon = request.start_lon + (request.end_lon - request.start_lon) * t
                 warnings.append(RouteWarning(
                     distance_meters=round(step * (i + 1)),
+                    lat=marker_lat,
+                    lon=marker_lon,
+                    passable=(htype != HazardType.curb),
                     type=htype, message_ru=ru, message_kz=kz, message_en=en,
                 ))
             safety_score = cfg["base_safety"]

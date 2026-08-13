@@ -53,7 +53,7 @@ export async function reverseGeocode(lat, lon) {
 
 // ─── Популярные места Алматы (быстрый поиск) ─────────────
 export const ALMATY_PLACES = [
-  { name: 'Медеу',                  lat: 43.1506, lon: 77.0601, emoji: '⛷️' },
+  { name: 'Медеу',                  lat: 43.1575, lon: 77.0586, emoji: '⛷️' },
   { name: 'Парк 28 панфиловцев',    lat: 43.2569, lon: 76.9290, emoji: '🌳' },
   { name: 'Зелёный базар',          lat: 43.2596, lon: 76.9515, emoji: '🥦' },
   { name: 'ЦУМ Алматы',             lat: 43.2548, lon: 76.9337, emoji: '🛍️' },

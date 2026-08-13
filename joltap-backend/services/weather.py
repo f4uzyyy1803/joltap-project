@@ -66,7 +66,9 @@ def get_weather(lat: float, lon: float) -> dict:
     description = raw["weather"][0]["description"]
     icon_code = raw["weather"][0]["icon"]
     humidity = raw["main"]["humidity"]
-    wind_speed = raw["wind"]["speed"]
+    # В штиль OpenWeatherMap иногда не присылает блок "wind" вообще —
+    # раньше это падало с KeyError
+    wind_speed = raw.get("wind", {}).get("speed", 0)
     city = raw.get("name", "")
 
     # Эвристика риска гололёда: температура около нуля + осадки

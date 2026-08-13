@@ -1,4 +1,3 @@
-import random
 from datetime import datetime
 from typing import List, Optional
 from models.models import (
@@ -25,6 +24,7 @@ HAZARDS_DB: List[dict] = [
 ]
 
 USERS_DB: dict = {}
+SOS_LOGS: List[dict] = []
 next_hazard_id = 6
 
 
@@ -36,15 +36,27 @@ def get_color_by_severity(severity: int) -> str:
 
 def get_hazards_near(lat: float, lon: float, radius_km: float = 1.0) -> List[HazardOnMap]:
     """
-    Возвращает все опасные зоны в радиусе radius_km от точки.
+    Возвращает опасные зоны в радиусе radius_km от точки.
     В реальности:
         SELECT * FROM hazards
         WHERE ST_DWithin(location, ST_MakePoint(%s, %s)::geography, %s)
+
+    Показываем только те, что подтверждены минимум 2 репортами
+    (confirmed_count >= 2) — раньше здесь не было вообще никакой
+    фильтрации по статусу, и единственный (в том числе случайный или
+    недобросовестный) репорт от кого угодно сразу появлялся на карте
+    у всех пользователей, хотя report_hazard() ниже честно помечает
+    новые записи как "pending_moderation". Тестовые точки из HAZARDS_DB
+    все имеют confirmed_count >= 2, так что видимость демо-данных не
+    меняется — эффект только на новые репорты через report_hazard().
     """
     import math
     result = []
 
     for h in HAZARDS_DB:
+        if h.get("confirmed_count", 0) < 2:
+            continue
+
         # Простое расстояние (в реальности — PostGIS ST_DWithin)
         dlat = (h["lat"] - lat) * 111000
         dlon = (h["lon"] - lon) * 111000 * math.cos(math.radians(lat))
@@ -143,7 +155,10 @@ def trigger_sos(request: SOSRequest) -> SOSResponse:
     # Симуляция вызова экстренных служб
     print(f"[SOS] Экстренный вызов: пользователь {request.user_id} на {request.lat}, {request.lon}")
 
-    # Логируем в БД
+    # Логируем (в реальности — БД, см. services/hazards_db.py::save_sos_log).
+    # Раньше лог только печатался в консоль и нигде не сохранялся — если
+    # бы понадобилось поднять историю SOS-вызовов пользователя, взять
+    # её было бы неоткуда.
     sos_log = {
         "user_id": request.user_id,
         "lat": request.lat,
@@ -151,6 +166,7 @@ def trigger_sos(request: SOSRequest) -> SOSResponse:
         "timestamp": datetime.now().isoformat(),
         "contacts_notified": notified
     }
+    SOS_LOGS.append(sos_log)
     print(f"[SOS LOG] {sos_log}")
 
     return SOSResponse(

@@ -157,9 +157,6 @@ function formatDur(min) {
   return min >= 60 ? Math.floor(min/60) + ' ч ' + Math.round(min%60) + ' мин' : Math.round(min) + ' мин';
 }
 
-// Инициализация панели снизу теми же значениями, что показывает React (для консистентности)
-document.getElementById('dist').textContent = formatDist(${distanceMeters || 0});
-document.getElementById('dur').textContent = formatDur(${durationMinutes || 0});
 
 // Строим маршрут: в приоритете — реальная геометрия из бэкенда
 // (массив ниже подставляется на этапе рендера React-компонента, не в WebView).
@@ -287,6 +284,7 @@ if (navigator.geolocation) {
         </View>
       )}
       <WebView
+        key={JSON.stringify(coordinates)}
         source={{ html }}
         style={{ flex: 1 }}
         onLoadEnd={() => setLoading(false)}

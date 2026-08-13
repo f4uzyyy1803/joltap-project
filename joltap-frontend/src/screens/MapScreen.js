@@ -89,6 +89,7 @@ export default function MapScreen({ navigation }) {
       setHazards(data);
     } catch (e) {
       // Тестовые данные если бэкенд недоступен
+      console.error('[buildRoute] failed:', e);
       setHazards([
         { id: 1, hazard_type: 'curb',          severity: 3, description: 'Высокий бордюр без съезда',  confirmed_count: 5, color: 'red',    lat: 0, lon: 0 },
         { id: 2, hazard_type: 'pothole',        severity: 2, description: 'Яма после зимы',             confirmed_count: 3, color: 'orange', lat: 0, lon: 0 },

@@ -4,6 +4,7 @@ pydantic
 
 # Граф дорог и маршрутизация (main.py / main_real.py)
 osmnx
+scikit-learn
 networkx
 shapely
 

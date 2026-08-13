@@ -33,7 +33,11 @@ const BASE_URL = getBaseUrl();
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 20000,
+  // Таймаут с запасом: для НОВОГО города (первый маршрут в этом городе)
+  // сервер сначала определяет город через Nominatim, потом качает граф
+  // OSM (может быть больше минуты для крупного города вроде Алматы).
+  // Для уже закэшированного города ответ обычно быстрый.
+  timeout: 90000,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -46,6 +50,8 @@ export const buildRoute = async (startLat, startLon, endLat, endLon, routeType =
     end_lon: endLon,
     route_type: routeType,
     user_id: userId,
+  }, {
+    timeout: 180000, // 3 минуты — первая загрузка графа города может быть долгой
   });
   return res.data;
 };
