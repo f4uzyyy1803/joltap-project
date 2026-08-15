@@ -21,7 +21,7 @@ const ARTICLES = [
 export default function HomeScreen({ navigation }) {
   const [userName, setUserName] = useState('');
   const [userId, setUserId]   = useState('');
-  const [weather, setWeather] = useState({ temp: '—', city: 'Алматы', feels: '—', desc: 'загрузка...', emoji: '⛅', ice_risk: false });
+  const [weather, setWeather] = useState({ temp: '—', city: '—', feels: '—', desc: 'загрузка...', emoji: '⛅', ice_risk: false });
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
@@ -38,17 +38,21 @@ export default function HomeScreen({ navigation }) {
 
   const loadWeather = async () => {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      let lat = 43.238949, lon = 76.889709; // Алматы по умолчанию, если нет доступа к геолокации
-      if (status === 'granted') {
-        const pos = await Location.getCurrentPositionAsync({});
-        lat = pos.coords.latitude;
-        lon = pos.coords.longitude;
+      let { status } = await Location.getForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        ({ status } = await Location.requestForegroundPermissionsAsync());
       }
+      if (status !== 'granted') {
+        setWeather({ temp: '—', city: 'Нет доступа к геолокации', feels: '—', desc: 'разрешите доступ в настройках', emoji: '📍', ice_risk: false });
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({});
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
       const data = await getWeather(lat, lon);
       setWeather({
         temp: `${data.temp > 0 ? '+' : ''}${data.temp}°`,
-        city: data.city || 'Алматы',
+        city: data.city || '—',
         feels: `${data.feels_like > 0 ? '+' : ''}${data.feels_like}°`,
         desc: data.description,
         emoji: data.emoji,
@@ -57,7 +61,7 @@ export default function HomeScreen({ navigation }) {
     } catch (e) {
       console.log('Weather error:', e.message);
       // Оставляем плейсхолдер, если бэкенд/ключ ещё не настроены
-      setWeather({ temp: '—', city: 'Алматы', feels: '—', desc: 'нет данных', emoji: '⛅', ice_risk: false });
+      setWeather({ temp: '—', city: '—', feels: '—', desc: 'нет данных', emoji: '⛅', ice_risk: false });
     }
   };
 

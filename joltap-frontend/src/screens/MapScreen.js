@@ -77,7 +77,9 @@ export default function MapScreen({ navigation }) {
       // Загружаем опасности рядом
       await loadHazards(loc.coords.latitude, loc.coords.longitude);
     } else {
-      setLocName('Алматы (без GPS)');
+      setLocName('Местоположение недоступно (нет GPS)');
+      // Без GPS реального города не узнать — это лишь заглушка,
+      // чтобы приложение не падало без координат.
       await loadHazards(43.238949, 76.889709);
     }
     setLoading(false);
@@ -99,6 +101,16 @@ export default function MapScreen({ navigation }) {
       ]);
     }
   };
+
+// Расстояние между двумя точками в метрах (формула гаверсинуса)
+const distanceMeters = (lat1, lon1, lat2, lon2) => {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
 
 const handleBuildRoute = async () => {
   if (!destination.trim()) {
@@ -138,9 +150,20 @@ const handleBuildRoute = async () => {
   };
 
   const destLower = destination.toLowerCase().trim();
-  const exactMatch = Object.entries(PLACES_COORDS).find(([key]) =>
-    destLower.includes(key) || key.includes(destLower)
-  );
+  // Эти словари — координаты конкретных мест Алматы. Названия вроде
+  // "Абай" или "Достык" повторяются в других городах, поэтому матч
+  // принимаем, только если пользователь физически недалеко (иначе это
+  // почти наверняка одноимённая улица в его собственном городе).
+  const NEARBY_LIMIT_M = 60000; // 60 км
+  const isNearAlmaty = location
+    ? distanceMeters(startLat, startLon, 43.238949, 76.889709) < NEARBY_LIMIT_M
+    : false;
+
+  const exactMatch = isNearAlmaty
+    ? Object.entries(PLACES_COORDS).find(([key]) =>
+        destLower.includes(key) || key.includes(destLower)
+      )
+    : null;
 
   let endLat = startLat + 0.015;
   let endLon = startLon + 0.012;
@@ -152,15 +175,17 @@ const handleBuildRoute = async () => {
     resolvedName = destination;
   } else {
     try {
-      const quick = ALMATY_PLACES.find(p =>
-        p.name.toLowerCase().includes(destination.toLowerCase())
-      );
+      const quick = isNearAlmaty
+        ? ALMATY_PLACES.find(p => p.name.toLowerCase().includes(destination.toLowerCase()))
+        : null;
       if (quick) {
         endLat = quick.lat;
         endLon = quick.lon;
         resolvedName = quick.name;
       } else {
-        const results = await geocode(destination);
+        // Привязываем поиск к текущим координатам пользователя —
+        // так в Караганде найдутся карагандинские улицы, в Алматы — алматинские.
+        const results = await geocode(destination, { lat: startLat, lon: startLon });
         if (results && results.length > 0) {
           endLat = results[0].lat;
           endLon = results[0].lon;

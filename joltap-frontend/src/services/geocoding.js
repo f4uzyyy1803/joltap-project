@@ -5,14 +5,37 @@
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org';
 
 // ─── Адрес → координаты ──────────────────────────────────
-export async function geocode(address) {
+// userLocation: { lat, lon } — текущие GPS-координаты, чтобы поиск
+// шёл в том городе, где реально находится человек, а не был жёстко
+// привязан к одному городу.
+export async function geocode(address, userLocation) {
   try {
-    const query = encodeURIComponent(`${address}, Алматы, Казахстан`);
-    const res = await fetch(
-      `${NOMINATIM_URL}/search?q=${query}&format=json&limit=5&countrycodes=kz`,
-      { headers: { 'User-Agent': 'JolTap/1.0' } }
-    );
-    const data = await res.json();
+    const query = encodeURIComponent(address);
+    let url = `${NOMINATIM_URL}/search?q=${query}&format=json&limit=5&countrycodes=kz&addressdetails=1`;
+
+    if (userLocation && userLocation.lat && userLocation.lon) {
+      // Прямоугольник ~110 км вокруг пользователя (0.5° по широте/долготе) —
+      // покрывает город и ближайшую область, но не «утаскивает» результат
+      // в другой конец страны. bounded=1 — жёсткое ограничение поиска этим боксом.
+      const d = 0.5;
+      const left   = userLocation.lon - d;
+      const right  = userLocation.lon + d;
+      const top    = userLocation.lat + d;
+      const bottom = userLocation.lat - d;
+      url += `&viewbox=${left},${top},${right},${bottom}&bounded=1`;
+    }
+
+    let res = await fetch(url, { headers: { 'User-Agent': 'JolTap/1.0' } });
+    let data = await res.json();
+
+    // Если рядом ничего не нашли (например, адрес в другом городе,
+    // куда человек только собирается) — пробуем ещё раз без жёсткой
+    // привязки к боксу, но уже в пределах Казахстана.
+    if ((!data || data.length === 0) && userLocation) {
+      const fallbackUrl = `${NOMINATIM_URL}/search?q=${query}&format=json&limit=5&countrycodes=kz&addressdetails=1`;
+      res = await fetch(fallbackUrl, { headers: { 'User-Agent': 'JolTap/1.0' } });
+      data = await res.json();
+    }
 
     if (!data || data.length === 0) return null;
 
@@ -21,6 +44,7 @@ export async function geocode(address) {
       lon:     parseFloat(item.lon),
       name:    item.display_name,
       short:   item.display_name.split(',').slice(0, 2).join(','),
+      city:    item.address?.city || item.address?.town || item.address?.county || '',
     }));
   } catch (e) {
     console.error('Geocode error:', e);
@@ -47,7 +71,7 @@ export async function reverseGeocode(lat, lon) {
 
     return parts.join(', ') || data.display_name.split(',')[0];
   } catch (e) {
-    return 'Алматы';
+    return 'Текущее место';
   }
 }
 
