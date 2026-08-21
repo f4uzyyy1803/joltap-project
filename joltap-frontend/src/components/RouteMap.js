@@ -8,7 +8,7 @@ import { colors } from '../theme';
 // Получить ключ: https://cloud.maptiler.com/account/keys/ (только email).
 const MAPTILER_KEY = process.env.EXPO_PUBLIC_MAPTILER_KEY;
 
-export default function RouteMap({ startLat, startLon, endLat, endLon, destName, onClose, distanceMeters, durationMinutes, coordinates }) {
+export default function RouteMap({ startLat, startLon, endLat, endLon, destName, onClose, distanceMeters, durationMinutes, coordinates, hazards }) {
   const [loading, setLoading] = useState(true);
 
   // Геометрия, реально посчитанная бэкендом для выбранного типа маршрута
@@ -17,6 +17,10 @@ export default function RouteMap({ startLat, startLon, endLat, endLon, destName,
   // с публичного OSRM, который ничего не знает ни про тип маршрута, ни про
   // препятствия. OSRM остаётся только запасным вариантом, если backendCoords пуст.
   const routeCoords = Array.isArray(coordinates) && coordinates.length >= 2 ? coordinates : [];
+
+  // Опасности с реальными координатами (заглушки без lat/lon, если бэкенд недоступен, отсеиваем —
+  // иначе они все нарисуются в точке [0,0] в Гвинейском заливе).
+  const hazardPoints = Array.isArray(hazards) ? hazards.filter(h => h.lat && h.lon) : [];
 
   const midLat = (startLat + endLat) / 2;
   const midLon = (startLon + endLon) / 2;
@@ -81,6 +85,18 @@ ${tileLayer}
 const endMarker = L.marker([${endLat}, ${endLon}], {
   title: '${destName || "Назначение"}'
 }).addTo(map).bindPopup('<b>${destName || "Назначение"}</b>').openPopup();
+
+// Опасности на маршруте — раньше вообще не рисовались на этой карте (только в отдельном табе списком)
+const hazardPoints = ${JSON.stringify(hazardPoints)};
+hazardPoints.forEach(h => {
+  L.circleMarker([h.lat, h.lon], {
+    radius: 8,
+    color: h.color || '#F5A623',
+    fillColor: h.color || '#F5A623',
+    fillOpacity: 0.8,
+    weight: 2
+  }).addTo(map).bindPopup('<b>' + (h.description || h.hazard_type || 'Опасность') + '</b>');
+});
 
 // Маркер моего местоположения (обновляется в реальном времени)
 const arrowHtml = '<div class="me-wrap"><div class="me-circle"></div><div class="me-arrow"><svg width="16" height="16" viewBox="0 0 24 24"><path d="M12 2 L19 21 L12 16.5 L5 21 Z" fill="white"/></svg></div></div>';
@@ -158,14 +174,40 @@ function formatDur(min) {
 }
 
 
+// ---------- Линия маршрута: держим ссылку и полный набор точек снаружи,
+// чтобы по мере ходьбы обрезать её до ближайшей к нам точки, а не просто
+// рисовать один раз от А до Б и забывать про неё ----------
+let routeLine = null;
+let fullRouteCoords = [];
+
+function setRouteLine(coords, extraStyle) {
+  fullRouteCoords = coords;
+  if (routeLine) map.removeLayer(routeLine);
+  routeLine = L.polyline(coords, Object.assign({ color:'#6B6FD4', weight:6, opacity:0.9 }, extraStyle || {})).addTo(map);
+  return routeLine;
+}
+
+// Обрезает линию до ближайшей к текущим координатам точки маршрута —
+// так полоса реально "сокращается" по мере ходьбы, а не висит целиком до конца.
+function trimRouteToPosition(lat, lon) {
+  if (!fullRouteCoords.length || !routeLine) return;
+  let nearestIdx = 0;
+  let nearestDist = Infinity;
+  for (let i = 0; i < fullRouteCoords.length; i++) {
+    const d = haversine(lat, lon, fullRouteCoords[i][0], fullRouteCoords[i][1]);
+    if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
+  }
+  routeLine.setLatLngs(fullRouteCoords.slice(nearestIdx));
+}
+
 // Строим маршрут: в приоритете — реальная геометрия из бэкенда
 // (массив ниже подставляется на этапе рендера React-компонента, не в WebView).
 const backendCoords = ${JSON.stringify(routeCoords)};
 
 if (backendCoords.length >= 2) {
   // Линия ровно та, что посчитал сервер для выбранного типа маршрута
-  const line = L.polyline(backendCoords, { color:'#6B6FD4', weight:6, opacity:0.9 }).addTo(map);
-  map.fitBounds(line.getBounds(), { padding:[60,60] });
+  setRouteLine(backendCoords);
+  map.fitBounds(routeLine.getBounds(), { padding:[60,60] });
 } else {
   // Бэкенд не прислал координаты (например, локальный fallback без сети) —
   // берём маршрут с публичного OSRM просто чтобы линия не пропадала совсем.
@@ -174,14 +216,12 @@ if (backendCoords.length >= 2) {
     .then(data => {
       if (data.routes && data.routes[0]) {
         const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
-        const line = L.polyline(coords, { color:'#6B6FD4', weight:6, opacity:0.9 }).addTo(map);
-        map.fitBounds(line.getBounds(), { padding:[60,60] });
+        setRouteLine(coords);
+        map.fitBounds(routeLine.getBounds(), { padding:[60,60] });
       }
     })
     .catch(() => {
-      L.polyline([[${startLat},${startLon}],[${endLat},${endLon}]], {
-        color:'#6B6FD4', weight:5, dashArray:'8,8'
-      }).addTo(map);
+      setRouteLine([[${startLat},${startLon}],[${endLat},${endLon}]], { weight:5, dashArray:'8,8' });
     });
 }
 
@@ -194,7 +234,8 @@ function onOrientation(e) {
   if (e.webkitCompassHeading !== undefined && e.webkitCompassHeading !== null) {
     h = e.webkitCompassHeading; // iOS Safari
   } else if (e.alpha !== null && e.absolute) {
-    h = 360 - e.alpha; // Android (absolute orientation)
+    h = e.alpha; // Android (absolute orientation) — alpha уже совпадает с компасным азимутом по часовой стрелке;
+                 // раньше тут было "360 - e.alpha", что зеркалило восток/запад (север/юг оставались верными)
   }
   if (h !== null && !isNaN(h)) deviceHeading = h;
 }
@@ -222,6 +263,10 @@ if (navigator.geolocation) {
       // Плавно едем в новую точку, а не телепортируемся
       animateMarkerTo(myMarker, lat, lon, 700);
       accuracyCircle.setLatLng([lat, lon]).setRadius(acc);
+
+      // Обрезаем полосу маршрута до текущей позиции — раньше она рисовалась
+      // один раз и оставалась целиком от А до Б, сколько бы вы ни прошли.
+      trimRouteToPosition(lat, lon);
 
       // Направление стрелки, по приоритету:
       // 1) GPS heading, если устройство реально движется (иначе он "шумит")
@@ -290,6 +335,7 @@ if (navigator.geolocation) {
         onLoadEnd={() => setLoading(false)}
         javaScriptEnabled
         domStorageEnabled
+        geolocationEnabled
       />
     </View>
   );

@@ -8,6 +8,7 @@ import os
 import traceback
 from fastapi import APIRouter, HTTPException, Query, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 from typing import List, Optional
 
 from database.db import get_db
@@ -23,6 +24,7 @@ from services.hazards_db import (
     get_hazards_near_db, report_hazard_db,
     save_sos_log, save_profile_db, get_profile_db
 )
+from services.osm_hazards import get_real_hazards
 from services.weather import get_weather
 
 
@@ -56,8 +58,43 @@ async def get_hazards(
     radius_km: float = Query(1.0),
     db: AsyncSession = Depends(get_db)
 ):
-    """Опасные зоны в радиусе radius_km от точки (PostGIS запрос)"""
-    return await get_hazards_near_db(db, lat, lon, radius_m=radius_km * 1000)
+    """
+    Опасные зоны в радиусе radius_km от точки.
+
+    Раньше отдавала только то, что руками засеяно/подтверждено в БД —
+    в новом городе (например, у пользователя не в Алматы) там пусто,
+    и на карте ничего не показывалось. Теперь дополнительно тянем
+    реальные объекты из OpenStreetMap (бордюры, неровное покрытие,
+    неосвещённые участки, лестницы, барьеры) вокруг точки — это работает
+    для любых координат в мире, а не только там, где кто-то уже что-то
+    засеял или отправил репорт.
+    """
+    db_hazards = await get_hazards_near_db(db, lat, lon, radius_m=radius_km * 1000)
+
+    # get_real_hazards синхронный (requests) — уводим в threadpool, чтобы не
+    # блокировать event loop; сигнатура принимает "маршрут" (старт+конец),
+    # для точки+радиуса просто передаём одну и ту же точку с паддингом
+    # в градусах, переведённым из radius_km (~111 км на градус широты).
+    padding_deg = radius_km / 111
+    osm_raw = await run_in_threadpool(
+        get_real_hazards, lat, lon, lat, lon, padding_deg
+    )
+
+    osm_hazards = [
+        HazardOnMap(
+            id=-(i + 1),  # отрицательные id — чтобы не пересекаться с id из БД
+            lat=h["lat"],
+            lon=h["lon"],
+            hazard_type=h["hazard_type"],
+            severity=h["severity"],
+            description=h["message_ru"],
+            confirmed_count=0,  # не краудсорс, а сырые данные OSM — не подтверждено людьми
+            color={1: "yellow", 2: "orange", 3: "red"}.get(h["severity"], "yellow"),
+        )
+        for i, h in enumerate(osm_raw)
+    ]
+
+    return db_hazards + osm_hazards
 
 
 @map_router.post("/report")
